@@ -1,15 +1,19 @@
 name: Build and Push to Amazon ECR
+
 on:
   push:
     branches:
       - main
-    workflow_dispatch:
+  workflow_dispatch:
+
 permissions:
   contents: read
   id-token: write
+
 env:
   AWS_REGION: us-east-2
   ECR_REPOSITORY: aws-release-lab
+
 jobs:
   build-and-push:
     name: Test, Build, and Push
@@ -19,11 +23,10 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
 
       - name: Install dependencies and run tests
         run: |
@@ -35,17 +38,21 @@ jobs:
             pip install -r requirements-dev.txt
           fi
           python -m pytest
+
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam: :357542025325:role/GithubActionsECRPushRole
+          role-to-assume: arn:aws:iam::357542025325:role/GitHubActionsECRPushRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build and Push Docker Image
-        env: 
-          REGISTRY: ${{steps.login-ecr.outputs.registry}}
-          IMAGE_TAG: ${{github.sha}}
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
           docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-EOF
