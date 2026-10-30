@@ -10,7 +10,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:AffaanA/aws-release-lab-app:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:AffaanA@139920686/aws-release-lab-app@1438455298:ref:refs/heads/main"
         }
       }
     }

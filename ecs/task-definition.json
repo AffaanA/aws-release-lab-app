@@ -1,0 +1,29 @@
+{
+  "family": "aws-release-lab",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::357542025325:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "flask-app",
+      "image": "357542025325.dkr.ecr.us-east-2.amazonaws.com/aws-release-lab:ef186ab5d26dd6f8b797621e0a964e813e4b78a8",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 5000,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "aws-release-lab",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
