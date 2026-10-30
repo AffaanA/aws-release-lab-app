@@ -1,4 +1,5 @@
-name: Build and Push to Amazon ECR
+
+name: CI/CD - AWS Release Lab
 
 on:
   push:
@@ -10,50 +11,114 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: aws-release-lab-deployment
+  cancel-in-progress: false
+
 env:
   AWS_REGION: us-east-2
   ECR_REPOSITORY: aws-release-lab
+  ECS_CLUSTER: aws-release-lab-cluster
+  ECS_SERVICE: aws-release-lab-service
+  TASK_DEFINITION_FAMILY: aws-release-lab
+  CONTAINER_NAME: flask-app
 
 jobs:
-  build-and-push:
-    name: Test, Build, and Push
+  build-test-deploy:
+    name: Test, Build, Push and Deploy
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout application source
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      # 2. Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # 3. Install dependencies and run tests
       - name: Install dependencies and run tests
         run: |
           python -m pip install --upgrade pip
+
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
+
           if [ -f requirements-dev.txt ]; then
             pip install -r requirements-dev.txt
           fi
+
           python -m pip install pytest
           python -m pytest
 
-      - name: Configure AWS credentials using OIDC
+      # 4. Authenticate with AWS using OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::357542025325:role/GitHubActionsECRPushRole
           aws-region: ${{ env.AWS_REGION }}
 
+      # 5. Authenticate Docker with ECR
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # 6. Build and push Docker image
       - name: Build and push Docker image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker build \
+            -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+
           docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+      # 7. Prepare task definition with the new image
+      - name: Render ECS task definition
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          jq --arg IMAGE "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            '(.containerDefinitions[] | select(.name == "flask-app").image) = $IMAGE' \
+            ecs/task-definition.json > task-definition-rendered.json
+
+          cat task-definition-rendered.json
+
+      # 8. Register new ECS task definition revision
+      - name: Register ECS task definition
+        id: task-definition
+        run: |
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://task-definition-rendered.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "task-definition-arn=$TASK_DEF_ARN" >> "$GITHUB_OUTPUT"
+
+          echo "Registered task definition: $TASK_DEF_ARN"
+
+      # 9. Deploy new revision to ECS service
+      - name: Deploy to Amazon ECS
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --task-definition "${{ steps.task-definition.outputs.task-definition-arn }}" \
+            --region "$AWS_REGION"
+
+      # 10. Wait for ECS deployment to complete
+      - name: Wait for ECS service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION"
+
+          echo "ECS deployment completed successfully."
+
